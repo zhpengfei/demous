@@ -1,0 +1,101 @@
+kind: pipeline
+type: docker   
+name: runner
+
+platform:
+  arch: amd64
+  os: linux
+
+workspace:
+  base: /drone
+
+steps:
+- name: build-vue
+  image: node:14-alpine
+  pull: if-not-exists
+  commands:
+    - npm config set registry http://registry.npm.taobao.org
+    - export CHROMEDRIVER_CDNURL=https://npm.taobao.org/mirrors/chromedriver
+    - cd vue
+    - npm install
+    - npm run build
+
+- name: backup
+  image: appleboy/drone-ssh
+  pull: if-not-exists
+  settings:
+    host: 
+      - 118.190.143.130
+    username: root
+    password: 
+      from_secret: ssh_password
+    script:
+      - cp -r /home/www/html/test/vue   /home/www/html/test/vuebak
+
+- name: deploy
+  image: appleboy/drone-scp
+  pull: if-not-exists
+  settings:
+    host: 
+      - 118.190.143.130
+    username: root
+    password: 
+      from_secret: ssh_password
+    target: /home/www/html/test/vue
+    source: /drone/vue/dist 
+
+- name: run
+  image: appleboy/drone-ssh
+  pull: if-not-exists
+  settings:
+    host: 
+      - 118.190.143.130
+    username: root
+    password: 
+      from_secret: ssh_password
+    script:
+      - ls -al
+      - echo vue
+  when:
+    event:
+      - push
+      - tag
+
+---
+kind: pipeline
+type: docker
+name: notify
+
+clone:
+  disable: true
+
+steps:
+- name: email
+  pull: if-not-exists
+  image: drillster/drone-email
+  settings:
+    recipients_only: true
+    recipients:
+      from_secret: email_recipients
+    subject: "Drone build: [{{ build.status }}] {{ repo.name }} ({{ repo.branch }}) #{{ build.number }}"
+    host: smtp.qq.com
+    port: 465
+    from:
+      from_secret: email_user
+    username:
+      from_secret: email_user
+    password:
+      from_secret: email_password
+- name: dingtalk
+  pull: if-not-exists
+  image: guoxudongdocker/drone-dingtalk
+  settings:
+    token:
+      from_secret: ding_token
+    type: markdown
+    message_color: true
+    message_pic: true
+trigger:
+  status: [success, failure]
+
+depends_on: [runner]
